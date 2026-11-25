@@ -1,0 +1,50 @@
+name: Publicar no YouTube
+
+on:
+  push:
+    branches: [main]
+    paths: ["queue/*.json"]
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Arquivo da fila (ex.: queue/ep06.json)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-youtube
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q google-api-python-client google-auth
+      - name: Publicar episódios da fila
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          INPUT_JOB: ${{ github.event.inputs.job }}
+        run: |
+          if [ -n "$INPUT_JOB" ]; then
+            JOBS="$INPUT_JOB"
+          else
+            JOBS=$(git diff --name-only HEAD~1 HEAD -- 'queue/*.json' || ls queue/*.json)
+          fi
+          for j in $JOBS; do python scripts/publish_youtube.py "$j"; done
+      - name: Gravar resultado
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add published/ || true
+          git diff --cached --quiet || (git commit -m "Publicado: $(ls -t published | head -1)" && git pull --rebase -q origin main && git push origin HEAD:main)
